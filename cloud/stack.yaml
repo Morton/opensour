@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: OpenSour database stack
+Parameters:
+  Namespace:
+    Type: String
+    Default: opensour
+    Description: Prefix used for naming resources and added as namespace tag
+Resources:
+  MetricsDatabase:
+    Type: AWS::Timestream::Database
+    Properties: 
+      DatabaseName: !Join [ "-", [ !Ref Namespace, "metrics" ] ]
+      Tags: 
+        - Key: namespace
+          Value: !Ref Namespace
+  DoughMetricsTable:
+    Type: AWS::Timestream::Table
+    Properties: 
+      DatabaseName: !Ref MetricsDatabase
+      TableName: dough-metrics
+      Tags: 
+        - Key: namespace
+          Value: !Ref Namespace
+  IngestFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - "lambda.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Description: Role assumed by opensour to ingest metrics into TimeStream
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AllowWrite 
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'timestream:WriteRecords'
+                Resource: !GetAtt DoughMetricsTable.Arn
+        - PolicyName: AllowDiscovery 
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'timestream:DescribeEndpoints'
+                Resource: "*"
+      RoleName: !Join [ "-", [ !Ref Namespace, "ingest-dough-metrics-role" ] ]
+      Tags: 
+        - Key: namespace
+          Value: !Ref Namespace
+  IngestFunction:
+    Type: AWS::Lambda::Function
+    Properties: 
+      Code:
+        S3Bucket: opensour-public-files
+        S3Key: lambda-latest.zip
+      Description: Ingesting new metric data from dough to TimeStream
+      Environment:
+        Variables:
+          AUTH_KEY: !Select [2, !Split ['/', !Ref AWS::StackId]]
+          DATABASE_NAME: !Ref MetricsDatabase
+          TABLE_NAME: !GetAtt DoughMetricsTable.Name
+      FunctionName: !Join [ "-", [ !Ref Namespace, "ingest-dough-metrics" ] ]
+      Handler: "index.handler"
+      PackageType: "Zip"
+      Role: !GetAtt IngestFunctionExecutionRole.Arn
+      Runtime: "nodejs16.x"
+      Tags:
+        - Key: namespace
+          Value: !Ref Namespace
+      Timeout: 5
+  IngestFunctionURL:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt IngestFunction.Arn
+  IngestFunctionAccessPermission:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !GetAtt IngestFunction.Arn
+      FunctionUrlAuthType: "NONE"
+      Principal: "*"
+Outputs:
+  HostString:
+    Description: Enter this "Host string" under "AWS configuration" in your device
+    Value: !Join [ "?", [ !GetAtt IngestFunctionURL.FunctionUrl, !Join [ "=", [ "auth", !Select [2, !Split ['/', !Ref AWS::StackId]] ] ] ] ]

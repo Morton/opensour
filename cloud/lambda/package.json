@@ -1,0 +1,14 @@
+{
+  "name": "opensour-injest-metrics",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "package": "zip -r ../lambda.zip ./*"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-timestream-write": "^3.289.0"
+  }
+}
